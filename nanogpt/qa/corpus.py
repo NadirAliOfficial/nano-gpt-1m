@@ -1,22 +1,18 @@
-"""
-Synthetic Q&A corpus generator for the tiny instruction model.
+"""Synthetic instruction corpus for NanoQA.
 
-Produces a plain-text file of examples in the format:
+Every example is:
 
     ### Question: <question>
     ### Answer: <answer>
     <|end|>
 
-The model only learns to answer the kinds of questions that appear here
-(small arithmetic, a fixed fact base, opposites, word length, greetings).
-Anything outside these templates will produce nonsense.
+The model only learns the templates defined here (small arithmetic, a fixed
+fact base, opposites, word length, greetings). Anything else is nonsense.
 """
 
 import random
 
-SEP_Q = "### Question: "
-SEP_A = "### Answer: "
-END = "<|end|>"
+from nanogpt.sampling import END, PROMPT_A, PROMPT_Q
 
 FACTS = {
     "What is the capital of France?": "Paris",
@@ -106,102 +102,75 @@ NUM_WORDS = {
     6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten",
 }
 
+DEMO_QUESTIONS = [
+    "What is 17 plus 26?",
+    "What is 90 minus 45?",
+    "What is 7 times 8?",
+    "What is the capital of Japan?",
+    "What color is the sky?",
+    "What is the opposite of hot?",
+    "How many days are in a week?",
+    "Who are you?",
+]
 
-def ex(q: str, a: str) -> str:
-    return f"{SEP_Q}{q}\n{SEP_A}{a}\n{END}\n\n"
+
+def _ex(q: str, a: str) -> str:
+    return f"{PROMPT_Q}{q}{PROMPT_A}{a}\n{END}\n\n"
 
 
 def build(target_examples: int = 60000, seed: int = 1234) -> str:
     rng = random.Random(seed)
     out = []
 
-    # 1. Addition (0..99)
-    for _ in range(int(target_examples * 0.22)):
+    for _ in range(int(target_examples * 0.22)):  # addition
         a, b = rng.randint(0, 99), rng.randint(0, 99)
         phr = rng.choice([
-            f"What is {a} plus {b}?",
-            f"What is {a} + {b}?",
-            f"Add {a} and {b}.",
-            f"{a} plus {b} equals what?",
+            f"What is {a} plus {b}?", f"What is {a} + {b}?",
+            f"Add {a} and {b}.", f"{a} plus {b} equals what?",
         ])
-        out.append(ex(phr, str(a + b)))
+        out.append(_ex(phr, str(a + b)))
 
-    # 2. Subtraction (non-negative)
-    for _ in range(int(target_examples * 0.16)):
+    for _ in range(int(target_examples * 0.16)):  # subtraction (non-negative)
         a = rng.randint(0, 99)
         b = rng.randint(0, a)
         phr = rng.choice([
-            f"What is {a} minus {b}?",
-            f"What is {a} - {b}?",
-            f"Subtract {b} from {a}.",
+            f"What is {a} minus {b}?", f"What is {a} - {b}?", f"Subtract {b} from {a}.",
         ])
-        out.append(ex(phr, str(a - b)))
+        out.append(_ex(phr, str(a - b)))
 
-    # 3. Multiplication (0..12 table)
-    for _ in range(int(target_examples * 0.16)):
+    for _ in range(int(target_examples * 0.16)):  # multiplication table
         a, b = rng.randint(0, 12), rng.randint(0, 12)
         phr = rng.choice([
-            f"What is {a} times {b}?",
-            f"What is {a} x {b}?",
-            f"Multiply {a} by {b}.",
+            f"What is {a} times {b}?", f"What is {a} x {b}?", f"Multiply {a} by {b}.",
         ])
-        out.append(ex(phr, str(a * b)))
+        out.append(_ex(phr, str(a * b)))
 
-    # 4. Number words
-    for _ in range(int(target_examples * 0.04)):
+    for _ in range(int(target_examples * 0.04)):  # number words
         n = rng.randint(0, 10)
         if rng.random() < 0.5:
-            out.append(ex(f"How do you write the number {n} in words?", NUM_WORDS[n]))
+            out.append(_ex(f"How do you write the number {n} in words?", NUM_WORDS[n]))
         else:
-            out.append(ex(f"What number is '{NUM_WORDS[n]}'?", str(n)))
+            out.append(_ex(f"What number is '{NUM_WORDS[n]}'?", str(n)))
 
-    # 5. Facts (repeat the fixed base many times)
     fact_items = list(FACTS.items())
-    reps = max(1, int(target_examples * 0.18) // len(fact_items))
-    for _ in range(reps):
-        for q, a in fact_items:
-            out.append(ex(q, a))
+    for _ in range(max(1, int(target_examples * 0.18) // len(fact_items))):
+        out.extend(_ex(q, a) for q, a in fact_items)
 
-    # 6. Opposites
     opp_items = list(OPPOSITES.items())
-    reps = max(1, int(target_examples * 0.06) // len(opp_items))
-    for _ in range(reps):
+    for _ in range(max(1, int(target_examples * 0.06) // len(opp_items))):
         for w, o in opp_items:
-            phr = rng.choice([
-                f"What is the opposite of {w}?",
-                f"Give the opposite of {w}.",
-            ])
-            out.append(ex(phr, o.capitalize()))
+            phr = rng.choice([f"What is the opposite of {w}?", f"Give the opposite of {w}."])
+            out.append(_ex(phr, o.capitalize()))
 
-    # 7. Word length
-    for _ in range(int(target_examples * 0.06)):
+    for _ in range(int(target_examples * 0.06)):  # word length
         w = rng.choice(WORDS)
         phr = rng.choice([
-            f"How many letters are in the word '{w}'?",
-            f"How many letters does '{w}' have?",
+            f"How many letters are in the word '{w}'?", f"How many letters does '{w}' have?",
         ])
-        out.append(ex(phr, str(len(w))))
+        out.append(_ex(phr, str(len(w))))
 
-    # 8. Greetings / meta (repeat)
-    reps = max(1, int(target_examples * 0.06) // len(GREETINGS))
-    for _ in range(reps):
-        for q, a in GREETINGS:
-            out.append(ex(q, a))
+    for _ in range(max(1, int(target_examples * 0.06) // len(GREETINGS))):
+        out.extend(_ex(q, a) for q, a in GREETINGS)
 
     rng.shuffle(out)
     return "".join(out)
-
-
-if __name__ == "__main__":
-    import argparse
-
-    p = argparse.ArgumentParser(description="Generate synthetic Q&A corpus")
-    p.add_argument("--out", type=str, default="qa_corpus.txt")
-    p.add_argument("--examples", type=int, default=60000)
-    args = p.parse_args()
-
-    text = build(args.examples)
-    with open(args.out, "w", encoding="utf-8") as f:
-        f.write(text)
-    n = text.count(END)
-    print(f"Wrote {args.out}: {len(text):,} chars, {n:,} examples.")

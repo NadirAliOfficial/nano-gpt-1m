@@ -1,68 +1,107 @@
-# NanoGPT-1M
+# nano-gpt-1m
 
-A small GPT-style decoder Transformer built from scratch in pure PyTorch, tuned to run on Apple Silicon (MPS) or CPU. Two models share the same architecture code:
+Two tiny GPT-style language models built from scratch in pure PyTorch, sharing one
+modular codebase. Runs on Apple Silicon (MPS), CUDA, or CPU — no GPU cluster needed.
 
-- **NanoGPT-1M** – ~1.07M params, byte-level, trained on tinyshakespeare for text continuation.
-- **NanoQA** – ~4.9M params, byte-level, trained on a synthetic instruction corpus to answer a fixed set of templated questions (small arithmetic, a fact base, opposites, word length, greetings).
+| Model | Params | Trained on | What it does |
+|---|---|---|---|
+| **NanoGPT-1M** | 1,071,648 | tinyshakespeare | continues text in a Shakespeare style |
+| **NanoQA** | 4,823,552 | synthetic Q&A corpus | answers a fixed set of templated questions |
 
-## Requirements
+Both are byte-level (256-token vocab, no out-of-vocab), decoder-only, pre-LayerNorm
+Transformers with weight-tied embeddings and GPT-2 style scaled-residual init.
+
+---
+
+## Install
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install torch
+pip install -e .            # or: pip install -r requirements.txt
 ```
 
-## NanoGPT-1M (Shakespeare)
+Everything below is also exposed as console scripts (`nanoqa-train`, `nanogpt-generate`, …) —
+see `[project.scripts]` in `pyproject.toml`.
 
-| | |
-|---|---|
-| Parameters | 1,071,648 |
-| Layers / heads / d_model | 4 / 6 / 144 |
-| Context | 256 tokens |
-| Tokenizer | byte-level UTF-8 (vocab 256) |
+---
+
+## NanoGPT-1M — Shakespeare
 
 ```bash
-python model.py                                    # layer-by-layer param breakdown
-python train.py --steps 1500 --batch_size 32       # ~100s on MPS, val loss ~1.83
-python generate.py --prompt "ROMEO:" --temp 0.8 --tokens 200
-python generate.py                                 # interactive REPL
-python app.py                                       # web UI at http://localhost:7860
+python -m nanogpt.cli.summary --preset shakespeare      # parameter breakdown
+python -m nanogpt.cli.train_shakespeare --steps 1500    # ~100s on MPS, val loss ~1.83
+python -m nanogpt.cli.generate --prompt "ROMEO:" --tokens 200
+python -m nanogpt.cli.generate                          # interactive REPL
+python -m nanogpt.web.shakespeare                       # web UI at http://localhost:7860
 ```
 
-Output is Shakespeare-flavoured: real words and correct speaker-turn formatting, no sentence-level coherence. That is the ceiling at 1M params.
+Output has real words and correct speaker-turn formatting but no sentence-level
+coherence. That is the ceiling at 1M parameters and byte-level tokens.
 
-## NanoQA (question answering)
-
-| | |
-|---|---|
-| Parameters | ~4.9M |
-| Layers / heads / d_model | 6 / 8 / 256 |
-| Context | 128 tokens |
-| Tokenizer | byte-level UTF-8 (vocab 256) |
+## NanoQA — question answering
 
 ```bash
-python qa_data.py                                  # build qa_corpus.txt (~56k examples)
-python train_qa.py --steps 4000                    # ~6 min on MPS, val loss ~0.17
-python chat.py                                      # interactive Q&A
-python chat.py --question "What is 23 plus 19?"
-python chat_app.py                                  # web chat UI at http://localhost:7861
+python -m nanogpt.cli.build_qa_corpus --examples 60000  # -> data/qa_corpus.txt
+python -m nanogpt.cli.train_qa --steps 4000             # ~6 min on MPS, val loss ~0.17
+python -m nanogpt.cli.chat --question "What is 23 plus 19?"
+python -m nanogpt.cli.chat                              # interactive loop
+python -m nanogpt.web.qa                                # web chat UI at http://localhost:7861
 ```
 
-It only handles the templates in `qa_data.py`. Facts, opposites, greetings and the times table are reliable; multi-digit subtraction is usually within ±2. Anything outside the trained templates produces confident nonsense — expected at this size.
+The corpus (`nanogpt/qa/corpus.py`) is fully synthetic: addition/subtraction (0–99),
+the times table (0–12), number words, ~50 fixed facts, 24 opposites, word-length
+counting, and greetings. NanoQA answers **only** these template types — facts,
+opposites, greetings and multiplication are reliable; multi-digit subtraction is
+usually within ±2. Anything outside the templates produces confident nonsense.
 
-## Files
+Each example is formatted as:
 
-| File | Purpose |
-|---|---|
-| `model.py` | `GPTConfig` + `NanoGPT` (attention, MLP, blocks, generate/stream) |
-| `tokenizer.py` | `ByteTokenizer` (and a `CharTokenizer` alternative) |
-| `dataset.py` | dataset download/caching and batch sampling |
-| `train.py` / `generate.py` / `app.py` | NanoGPT-1M train, CLI, web UI |
-| `qa_data.py` / `train_qa.py` / `chat.py` / `chat_app.py` | NanoQA corpus, train, CLI, web UI |
-| `test_model.py` | tokenizer + architecture + forward/backward sanity checks |
+```
+### Question: What is 7 plus 5?
+### Answer: 12
+<|end|>
+```
+
+Inference prompts the model with `### Question: <q>\n### Answer: ` and stops at the
+first `<|end|>` / newline marker.
+
+---
+
+## Project layout
+
+```
+nanogpt/
+├── config.py        GPTConfig + SHAKESPEARE / QA presets
+├── model.py         NanoGPT: attention, MLP, block, generate / stream_generate
+├── tokenizer.py     ByteTokenizer (default) + CharTokenizer
+├── data.py          dataset download/cache + TextDataset batch sampler
+├── sampling.py      complete(), stream_complete(), answer() + the Q&A format
+├── training.py      cosine_lr, estimate_loss, train_loop, load_checkpoint
+├── qa/corpus.py     synthetic instruction corpus generator
+├── cli/             python -m entrypoints (summary, train_*, generate, chat, build_qa_corpus)
+└── web/             dependency-free HTTP UIs (server.py + shakespeare.py / qa.py + templates/)
+
+tests/test_model.py  tokenizer round-trip, param counts, forward/backward, generation
+checkpoints/         saved models (git-ignored, created by training)
+data/                downloaded / generated corpora (git-ignored)
+```
+
+## Design notes
+
+- **Byte-level tokenizer** keeps the vocab at 256, so almost all parameters go to
+  attention and MLP rather than a large embedding table. `stream_complete` buffers
+  bytes and only emits complete UTF-8 sequences.
+- **One training loop** (`train_loop`) drives both models; the CLIs differ only in
+  the config preset, the dataset, and an `on_sample` callback for live demos.
+- **`scaled_dot_product_attention`** is used when available (PyTorch ≥ 2.0), with a
+  manual masked-softmax fallback for older versions. Attention-weight dropout is
+  disabled (the MPS SDPA kernel rejects it); the residual/MLP/embedding dropout
+  layers still regularize.
+- Checkpoints store the `GPTConfig`, so `load_checkpoint` reconstructs the exact
+  model. `torch.load(..., weights_only=False)` is required for that.
 
 ## Tests
 
 ```bash
-python test_model.py
+pip install pytest && pytest -q      # or: python tests/test_model.py
 ```

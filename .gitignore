@@ -1,13 +1,12 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
 
-# Trained checkpoints (regenerate with train.py / train_qa.py)
-*.pt
-
-# Datasets (downloaded or generated)
-shakespeare.txt
-qa_corpus.txt
-qa.txt
-*.txt
-!requirements*.txt
+# Runtime artifacts
+checkpoints/
+data/

@@ -1,1 +1,5 @@
+# Runtime
 torch>=2.2
+
+# Dev (optional)
+# pytest>=7
